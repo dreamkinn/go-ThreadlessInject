@@ -19,4 +19,4 @@ export GOOS=windows && go build -o tinject.exe threadlessinject.go
 ```
 
 ### Known issues
-- If the program loops and doens't find a memory hole : turns out that if your golang installation is not in English, some error messages are different and break the allocation checks (just remove the "The operation completed successfully." checks......)
+- If the program loops and doesn't find a memory hole : turns out that if your golang installation is not in English, some error messages are different and break the allocation checks (just remove the "The operation completed successfully." checks......)
